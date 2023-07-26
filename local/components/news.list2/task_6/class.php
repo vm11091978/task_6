@@ -2,9 +2,21 @@
 if(!defined("B_PROLOG_INCLUDED") || B_PROLOG_INCLUDED!==true) die();
 
 use Bitrix\Iblock;
+use Bitrix\Main\Localization\Loc;
+use Bitrix\Main\SystemException;
+use Bitrix\Main\Loader;
 
 class DemoClass extends CBitrixComponent
 {
+    protected $errors = array();
+
+    // подключение языковых файлов (метод подключается автоматически)
+    public function onIncludeComponentLang()
+    {
+        Loc::loadMessages(__FILE__);
+    }
+
+    // обработка массива $arParams (метод подключается автоматически)
     // Родительский метод проходит по всем параметрам переданным в $APPLICATION->IncludeComponent
     // и применяет к ним функцию htmlspecialcharsex. В данном случае такая обработка избыточна.
     // Переопределяем.
@@ -18,24 +30,47 @@ class DemoClass extends CBitrixComponent
         return $result;
     }
 
-    public function muFunction($idIBlock)
+    // выполняет основной код компонента, аналог конструктора (метод подключается автоматически)
+    public function executeComponent()
     {
-        $filter = self::getFilterValueOrShowError($idIBlock);
-        // если переменная $filter не получена, значит возникла ошибка, и дальнейший код выполнять не нужно
-        if (!$filter)
-            return;
+        try {
+            $idIBlock = $this->arParams["IBLOCK_ID"];
+            $flag = $this->checkIBlock($idIBlock);
+            // если переменная $flag получена, значит возникла ошибка, и дальнейший код выполнять не нужно
+            if (!$flag) {
+                $this->arResult = $this->muFunction($idIBlock);
+                $this->includeComponentTemplate();
+            }
+        } catch (SystemException $e) {
+            ShowError($e->getMessage());
+        }
+    }
+
+    protected function checkIBlock($idIBlock)
+    {
+        $rsElement = CIBlockElement::GetList([], ['IBLOCK_ID' => $idIBlock]);
+
+        if ($idIBlock != 0 && !$rsElement->GetNext()) {
+            ShowError("Инфоблока с таким ID не существует!");
+            return true;
+        }
+    }
+
+    protected function muFunction($idIBlock)
+    {
+        if ($idIBlock == 0) // $idIBlock (м.б.) равна нулю, если 'IBLOCK_ID' не задан или в нём используются нецифровые символы
+            $filter = ['IBLOCK_TYPE' => 'news'];
+        else
+            $filter = ['IBLOCK_ID' => $idIBlock];
 
         $arFilter = array("IBLOCK_LID" => SITE_ID, "ACTIVE" => "Y", $filter);
 
         $additionalCacheID = false;
         if ($this->startResultCache($arParams["CACHE_TIME"], $additionalCacheID))
         {
-            $arResult["ITEMS"] = array();
-            // $arResult["ELEMENTS"] = array();
             $arGroupBy = Array("IBLOCK_ID");
             $rsElement = CIBlockElement::GetList(["TIMESTAMP_X" => "DESC"], $arFilter, false);
 
-            $arResult["IdElementIdBlock"] = array();
             while ($row = $rsElement->GetNext()) // ->Fetch()
             {
                 $id = (int)$row["ID"];
@@ -43,7 +78,7 @@ class DemoClass extends CBitrixComponent
                 // $arResult["ELEMENTS"][] = $id;
 
                 // Получим массив такого вида: Array( [3] => 1 [2] => 1 [345] => 9 [343] => 9 ... [335] => 1 [336] => 1 )
-                $arResult["IdElementIdBlock"][$id] = $row["IBLOCK_ID"];
+                $arIdElementIdBlock[$id] = $row["IBLOCK_ID"];
             }
             unset($rsElement);
 
@@ -61,8 +96,7 @@ class DemoClass extends CBitrixComponent
             unset($arItem);
 
             // Преобразуем массив данных $arResult["ITEMS"] в массив $arResult['IBLOCKS']
-            $arResult["IBLOCKS"] = array();
-            foreach ($arResult["IdElementIdBlock"] as $element_id => $block_id)
+            foreach ($arIdElementIdBlock as $element_id => $block_id)
             {
                 foreach ($arResult["ITEMS"] as $key => $value)
                 {
@@ -70,30 +104,10 @@ class DemoClass extends CBitrixComponent
                         $arResult["IBLOCKS"][$block_id][$element_id] = $value;
                 }
             }
+            unset($arIdElementIdBlock);
             unset($arResult["ITEMS"]);
-            unset($arResult["IdElementIdBlock"]);
-            // print_r($arResult['IBLOCKS']);
 
             return $arResult;
         }
-    }
-
-    private static function getFilterValueOrShowError($idIBlock)
-    {
-        $rsElement = CIBlockElement::GetList([], ['IBLOCK_ID' => $idIBlock]);
-        if ($idIBlock == 0) // $idIBlock (м.б.) равна нулю, если 'IBLOCK_ID' не задан или в нём используются нецифровые символы
-        {
-            $filter = ['IBLOCK_TYPE' => 'news'];
-        }
-        else
-        {
-            if (!$rsElement->GetNext()) {
-                ShowError("Инфоблока с таким ID не существует!");
-                return;
-            }
-            $filter = ['IBLOCK_ID' => $idIBlock];
-        }
-
-        return $filter;
     }
 }
